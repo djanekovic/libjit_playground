@@ -32,15 +32,15 @@ struct ExprAST {
 struct NumberExprAST: public ExprAST {
     const jit_float64 value;
 
-    NumberExprAST(jit_float64 value): value{value} {}
-    void accept(Visitor *visitor) const { visitor->visit_number_node(this); }
+    explicit NumberExprAST(jit_float64 value): value{value} {}
+    void accept(Visitor *visitor) const override { visitor->visit_number_node(this); }
 };
 
 // AST node for identifier
 struct IdentifierExprAST: public ExprAST {
-    const std::string identifier;
-    IdentifierExprAST(const std::string &id): identifier{id} {}
-    void accept(Visitor *visitor) const { visitor->visit_identifier_node(this); }
+    const std::string &identifier;
+    explicit IdentifierExprAST(const std::string &id): identifier{id} {}
+    void accept(Visitor *visitor) const override { visitor->visit_identifier_node(this); }
 };
 
 enum class BinaryOperator {
@@ -56,7 +56,7 @@ struct BinaryExprAST: public ExprAST {
     const std::unique_ptr<ExprAST> lhs, rhs;
     BinaryExprAST(BinaryOperator op, std::unique_ptr<ExprAST> lhs, std::unique_ptr<ExprAST> rhs):
         op{op}, lhs{std::move(lhs)}, rhs{std::move(rhs)} {}
-    void accept(Visitor *visit) const { visit->visit_binary_node(this); }
+    void accept(Visitor *visit) const override { visit->visit_binary_node(this); }
 };
 
 enum class UnaryOperator {
@@ -81,29 +81,29 @@ struct UnaryExprAST: public ExprAST {
 
     UnaryExprAST(UnaryOperator op, std::unique_ptr<ExprAST> arg):
         op{op}, arg{std::move(arg)} {}
-    void accept(Visitor *visit) const { visit->visit_unary_node(this); }
+    void accept(Visitor *visit) const override { visit->visit_unary_node(this); }
 };
 
 //Visitor implementations for codegen and AST analysis
 class UserFunction: public jit_function, public Visitor {
-    ExprAST const &ast;
-    std::vector<std::string> identifiers;
+    const ExprAST &ast;
+    const std::vector<std::string> &identifiers;
     jit_value current_result;
 
     public:
-        UserFunction(jit_context &context, ExprAST const &ast, std::vector<std::string> &identifiers):
+        UserFunction(jit_context &context, ExprAST const &ast, const std::vector<std::string> &identifiers):
             jit_function(context), ast{ast}, identifiers{identifiers}
         {
             create();
         }
 
-        jit_type_t create_signature()
+        jit_type_t create_signature() override
         {
             std::vector<jit_type_t> params(identifiers.size(), jit_type_float64);
             return jit_type_create_signature(jit_abi_cdecl, jit_type_float64, params.data(), params.size(), 1);
         }
 
-        void build()
+        void build() override
         {
             ast.accept(this);
             insn_return(current_result);
@@ -120,7 +120,7 @@ class UserFunction: public jit_function, public Visitor {
             return result;
         }
 
-        void visit_binary_node(const BinaryExprAST *node)
+        void visit_binary_node(const BinaryExprAST *node) override
         {
             node->lhs->accept(this);
             jit_value tmp_left = current_result;
@@ -143,7 +143,7 @@ class UserFunction: public jit_function, public Visitor {
             }
         }
 
-        void visit_unary_node(const UnaryExprAST *node)
+        void visit_unary_node(const UnaryExprAST *node) override
         {
             node->arg->accept(this);
             jit_value tmp = current_result;
@@ -188,12 +188,12 @@ class UserFunction: public jit_function, public Visitor {
             }
         }
 
-        void visit_number_node(const NumberExprAST *node)
+        void visit_number_node(const NumberExprAST *node) override
         {
             current_result = new_constant(node->value, jit_type_float64);
         }
 
-        void visit_identifier_node(const IdentifierExprAST *node)
+        void visit_identifier_node(const IdentifierExprAST *node) override
         {
             auto it = std::find(identifiers.cbegin(), identifiers.cend(), node->identifier);
             current_result = get_param(std::distance(identifiers.cbegin(), it));
@@ -209,7 +209,7 @@ std::unique_ptr<NumberExprAST> Number(double val)
     return std::make_unique<NumberExprAST>(static_cast<jit_float64>(val));
 }
 
-std::unique_ptr<IdentifierExprAST> Identifier(std::string identifier) {
+std::unique_ptr<IdentifierExprAST> Identifier(const std::string &identifier) {
     return std::make_unique<IdentifierExprAST>(identifier);
 }
 
@@ -223,7 +223,7 @@ std::unique_ptr<BinaryExprAST> Add(std::unique_ptr<ExprAST> lhs, std::unique_ptr
     return std::make_unique<BinaryExprAST>(BinaryOperator::Plus, std::move(lhs), std::move(rhs));
 }
 
-int main(void)
+int main()
 {
     auto ast = Add(Mult(Number(1), Number(2)), Mult(Identifier("y"), Identifier("x")));
     std::vector<std::string> identifiers({"x", "y"});
